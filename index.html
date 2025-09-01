@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>노드/엣지 그래프 에디터</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #141a2d;
+      --ink: #e8eefc;
+      --muted: #9fb0d6;
+      --accent: #7aa2ff;
+      --warn: #ff6b6b;
+      --edge: #c9d5ff55;
+      --sel: #ffd166;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Noto Sans KR, Apple SD Gothic Neo, sans-serif; }
+    .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    .toolbar {
+      display: flex; gap: .5rem; align-items: center; padding: .6rem .8rem; border-bottom: 1px solid #1c2440; background: linear-gradient(180deg, #111831, #0e1429);
+      position: sticky; top: 0; z-index: 5;
+    }
+    .toolbar .group { display:flex; gap:.4rem; align-items:center; padding-right:.5rem; border-right:1px dashed #273055; }
+    .toolbar .group:last-child{border-right:none}
+    button, select, input[type="text"], textarea, label.toggle { 
+      background: #0f1630; color: var(--ink); border: 1px solid #24305e; border-radius: 10px; padding: .44rem .7rem; outline: none; 
+    }
+    button { cursor: pointer; transition: .15s ease; }
+    button:hover { border-color: #3e58b8; box-shadow: 0 0 0 2px #3e58b82a inset; }
+    .toggle { display:inline-flex; align-items:center; gap:.4rem; padding:.3rem .55rem; user-select:none; cursor:pointer; }
+    .toggle input { appearance:none; width:1.1rem; height:1.1rem; border-radius:.35rem; border:1px solid #3a4a86; display:inline-block; position:relative; }
+    .toggle input:checked { background: var(--accent); border-color: var(--accent); }
+    .spacer { flex: 1; }
+    .hint { color: var(--muted); font-size: 12px; }
+
+    .stage-wrap { position: relative; overflow: hidden; }
+  /* SVG 배경 교체 + 가장자리 비네트 */
+  svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background:
+      radial-gradient(1100px 65% at 70% -10%, #1b265a 0%, #121a3a 35%, transparent 60%),
+      radial-gradient(900px 60% at 15% 110%, #101a3d 0%, transparent 55%),
+      radial-gradient(80% 80% at 50% 35%, #0f1736 0%, #0b1020 65%);
+    position: relative;
+    overflow: hidden;
+  }
+  svg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    /* 부드러운 비네트 */
+    background: radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(0,0,0,0.35) 100%);
+  }
+    /* slide-in sidebar (overlay) */
+    .sidebar {
+      position: fixed;          /* 레이아웃 영향 X, 캔버스 안 흔들림 */
+      top: 0;
+      right: 0;
+      width: 320px;
+      height: 100vh;
+      background: var(--panel);
+      border-left: 1px solid #20294d;
+      transform: translate3d(100%, 0, 0);
+      transition: transform .28s ease-in-out; /* 열림/닫힘 동일 이징 */
+      z-index: 1000;            /* 캔버스 위로 */
+      box-shadow: -12px 0 40px #00000055;
+      will-change: transform;
+      contain: layout paint;    /* 격리로 퍼포먼스 안정 */
+    }
+
+    /* 열린 상태 */
+    .sidebar.open {
+      transform: translate3d(0, 0, 0);
+      /* 별도의 transition 재정의 없음 → 역과정으로 동일하게 */
+    }
+
+    /* 내부 요소는 그대로 사용해도 OK, 필요시 입력칸 폭만 살짝 보정 */
+    .sidebar header { padding: 12px 14px; border-bottom: 1px solid #273055; font-weight: 700; letter-spacing:.3px; }
+    .sidebar .body { padding: 12px 14px; display: grid; gap: 10px; }
+    .sidebar .row { display: grid; gap:6px; }
+    .sidebar label { color: var(--muted); font-size: 12px; }
+    .sidebar input, .sidebar textarea {
+      width: calc(100% - 20px);
+      max-width: none;          /* 고정폭 패널이니 별도 제한 해제 */
+      background: #0f1630;
+      border: 1px solid #24305e;
+      border-radius: 8px;
+      color: var(--ink);
+      padding: 8px 10px;
+    }
+    .sidebar textarea { min-height: 90px; resize: vertical; }
+    .sidebar .actions { display:flex; gap: 8px; }
+
+    /* floating node form */
+    .node-form { position: absolute; background: var(--panel); border: 1px solid #23305d; border-radius: 12px; padding: 12px; width: 280px; box-shadow: 0 20px 60px #0008; z-index: 20; display: none; }
+    .node-form header { font-weight: 700; margin-bottom: 8px; }
+    .node-form .row { display:grid; gap:6px; margin-bottom:8px; }
+    .node-form .row:last-child{margin-bottom:0}
+    .node-form .tip { color: var(--muted); font-size: 12px; }
+    .node-form .btns { display:flex; gap:8px; justify-content:flex-end; }
+
+    /* selection badges */
+    .badge { font-size: 12px; color: #cfd9ff; background:#172046; border:1px solid #2b3a7d; padding:2px 8px; border-radius:999px; }
+
+    /* download link for export */
+    .download-link { color: #cfe0ff; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="toolbar">
+      <div class="group" style="gap:.5rem;">
+        <button id="btnAddNode">노드 추가</button>
+      </div>
+
+      <div class="group" style="gap:.35rem; align-items:center;">
+        <span class="hint">연결선 종류:</span>
+        <label class="toggle"><input type="radio" name="edgeStyle" value="arrow" checked /> 화살표(기본)</label>
+        <label class="toggle"><input type="radio" name="edgeStyle" value="double" /> 양방향</label>
+        <label class="toggle"><input type="radio" name="edgeStyle" value="line" /> 선분</label>
+      </div>
+
+      <div class="group">
+        <input type="text" id="edgeNameA" placeholder="노드1 이름" style="width:120px;" />
+        <input type="text" id="edgeNameB" placeholder="노드2 이름" style="width:120px;" />
+        <button id="btnConnectByName">이름으로 연결</button>
+      </div>
+
+      <div class="group" style="gap:.5rem;">
+        <button id="btnExport">JSON 저장</button>
+        <input type="file" id="fileImport" accept="application/json" style="display:none;" />
+        <button id="btnImport">JSON 불러오기</button>
+        <button id="btnReset" style="color:#fff;background:#4b1f2a;border-color:#7a2f43;">초기화</button>
+      </div>
+
+      <div class="group">
+        <label class="toggle">
+          <input type="checkbox" id="togglePhysics" checked />
+          물리 적용
+        </label>
+      </div>
+      <span class="spacer"></span>
+      <span class="hint">Alt/⌥ + 휠 확대/축소 · 선택 후 Delete 삭제</span>
+    </div>
+
+    <div class="stage-wrap" id="stageWrap">
+      <!-- slide-in sidebar for node details -->
+      <aside class="sidebar" id="sidebar">
+        <header>노드 정보</header>
+        <div class="body">
+          <div class="row"><label>이름</label><input id="sbName" type="text" /></div>
+          <div class="row"><label>종류</label><input id="sbType" type="text" /></div>
+          <div class="row"><label>설명</label><textarea id="sbDesc"></textarea></div>
+          <div class="actions">
+            <button id="sbSave">저장</button>
+            <button id="sbClose" style="opacity:.8;">닫기</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- floating node creation form (appears near click) -->
+      <div class="node-form" id="nodeForm">
+        <header>노드 만들기</header>
+        <div class="row"><label>이름</label><input id="nfName" type="text" placeholder="예) A, 사용자, 사건1" /></div>
+        <div class="row"><label>종류</label><input id="nfType" type="text" placeholder="예) 사람, 장소, 개념" /></div>
+        <div class="row"><label>설명 <span class="tip">(선택)</span></label><textarea id="nfDesc" placeholder="선택 시 오른쪽 패널에 표시"></textarea></div>
+        <div class="btns">
+          <button id="nfCancel">취소</button>
+          <button id="nfCreate">만들기</button>
+        </div>
+      </div>
+
+      <!-- SVG Stage -->
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrowEnd" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="8" markerHeight="5" orient="auto" markerUnits="strokeWidth">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffd166"/>
+          </marker>
+          <marker id="arrowStart" viewBox="0 0 10 10" refX="1" refY="5"
+                  markerWidth="8" markerHeight="5" orient="auto" markerUnits="strokeWidth">
+            <path d="M 10 0 L 0 5 L 10 10 z" fill="#ffd166"/>
+          </marker>
+        </defs>
+        <!-- pan/zoom viewport -->
+        <g id="viewport" transform="translate(0,0) scale(1)">
+          <!-- large hit rect for background clicks -->
+          <rect id="bg" x="-4000" y="-4000" width="8000" height="8000" fill="transparent"/>
+
+          <g id="edges"></g>
+          <g id="nodes"></g>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <script>
+  // ==========================
+  // Data & Utilities
+  // ==========================
+  const svg = document.getElementById('svg');
+  const viewport = document.getElementById('viewport');
+  const gNodes = document.getElementById('nodes');
+  const gEdges = document.getElementById('edges');
+  const sidebar = document.getElementById('sidebar');
+  const sbName = document.getElementById('sbName');
+  const sbType = document.getElementById('sbType');
+  const sbDesc = document.getElementById('sbDesc');
+
+  const nodeForm = document.getElementById('nodeForm');
+  const nfName = document.getElementById('nfName');
+  const nfType = document.getElementById('nfType');
+  const nfDesc = document.getElementById('nfDesc');
+
+  let nodes = []; // {id, name, type, desc, x, y}
+  let edges = []; // {id, source, target, style: 'arrow'|'double'|'line', name}
+  let nextNodeId = 1, nextEdgeId = 1;
+  const typeColor = new Map();
+  const palette = [
+    '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+    '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf',
+    '#aec7e8','#ffbb78','#98df8a','#ff9896','#c5b0d5'
+  ];
+  let paletteIdx = 0;
+
+  function colorForType(type){
+    const key = (type||'').trim();
+    if(!typeColor.has(key)){
+      const c = palette[paletteIdx % palette.length];
+      paletteIdx++;
+      typeColor.set(key, c);
+    }
+    return typeColor.get(key);
+  }
+
+  function byId(arr, id){ return arr.find(x=>x.id===id); }
+
+  // selection state
+  let selectedNodeId = null; 
+  let selectedEdgeId = null;
+  function clearSelection(){
+    selectedNodeId = selectedEdgeId = null;
+    renderSelection();
+    hideSidebar();
+  }
+
+  function updatePhysics(){
+    if(!physicsEnabled) return;
+
+    const kRepel   = 1200;   // 척력 계수
+    const kAttract = 0.002;  // 인력 계수 (기본)
+    const kRestore = 0.01;   // 제자리 복원 계수
+    const damping  = 0.85;   // 속도 감쇠
+
+    // 연결 여부 판별용 세트 (양방향 키를 모두 넣어 빠르게 조회)
+    const connected = new Set();
+    for (const e of edges) {
+      connected.add(e.source + '-' + e.target);
+      connected.add(e.target + '-' + e.source);
+    }
+    const edgeAttractBoost = 4; // 연결 쌍 인력 강화 배수 (원하는 만큼 3~10 사이로 조절)
+
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      let fx = 0, fy = 0;
+
+      for (let j = 0; j < nodes.length; j++) {
+        if (i === j) continue;
+        const m = nodes[j];
+        const dx = n.x - m.x, dy = n.y - m.y;
+        const dist2 = dx*dx + dy*dy;
+        if (dist2 < 1e-2) continue;
+        const dist = Math.sqrt(dist2);
+
+        // 기본 척력
+        let f = kRepel / dist2;
+
+        // 연결된 쌍이면 인력 계수 강화
+        const isConnectedPair = connected.has(n.id + '-' + m.id);
+        const attractCoeff = isConnectedPair ? (kAttract * edgeAttractBoost) : kAttract;
+
+        // 인력 (거리에 비례)
+        f -= attractCoeff * dist;
+
+        fx += f * (dx / dist);
+        fy += f * (dy / dist);
+      }
+
+      // 제자리 복원력
+      fx += (n.origX - n.x) * kRestore;
+      fy += (n.origY - n.y) * kRestore;
+
+      // 속도/위치 업데이트
+      n.vx = (n.vx + fx) * damping;
+      n.vy = (n.vy + fy) * damping;
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+  }
+
+  // === edge endpoint helper (ADD) ===
+  // 노드 반지름과 화살촉 여유를 고려해 선의 시작/끝 좌표를 보정
+  const NODE_R = 6;        // 노드 원의 r 값과 동일해야 함
+  const ARROW_PAD = 5;     // 화살촉이 원을 파고들지 않도록 여유 (markerSize 8이면 4~5 권장)
+
+  function edgeEndpoints(src, tgt){
+    const dx = tgt.x - src.x, dy = tgt.y - src.y;
+    const L = Math.hypot(dx, dy) || 1;
+    const ux = dx / L, uy = dy / L;
+    return {
+      x1: src.x + ux * NODE_R,
+      y1: src.y + uy * NODE_R,
+      x2: tgt.x - ux * (NODE_R + ARROW_PAD),
+      y2: tgt.y - uy * (NODE_R + ARROW_PAD),
+    };
+  }
+
+  function showSidebarForNode(node){
+    sbName.value = node.name || '';
+    sbType.value = node.type || '';
+    sbDesc.value = node.desc || '';
+    sidebar.classList.add('open');
+    setTimeout(()=>sbName.focus(), 0);
+  }
+  
+  function hideSidebar(){
+    sidebar.classList.remove('open');
+    // 선택 해제도 같이 처리
+    selectedNodeId = null;
+    selectedEdgeId = null;
+    renderSelection();
+  }
+
+  window.addEventListener('keydown', (e)=>{
+    if(e.key === 'Escape' || e.key === 'Esc'){
+      if(sidebar.classList.contains('open')){
+        e.preventDefault();
+        hideSidebar();
+      }
+    }
+  });
+
+  // ==========================
+  // Rendering
+  // ==========================
+  function render(){
+    // nodes
+    gNodes.innerHTML = '';
+    for(const n of nodes){
+      const group = document.createElementNS('http://www.w3.org/2000/svg','g');
+      group.setAttribute('data-id', n.id);
+      group.classList.add('node');
+      group.style.cursor = 'pointer';
+
+      const color = colorForType(n.type);
+
+      const halo = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      halo.setAttribute('cx', n.x); halo.setAttribute('cy', n.y); halo.setAttribute('r', 10);
+      halo.setAttribute('fill', 'none'); halo.setAttribute('stroke', '#000'); halo.setAttribute('stroke-opacity', '0.25'); halo.setAttribute('stroke-width', 3);
+
+      const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('cx', n.x); c.setAttribute('cy', n.y); c.setAttribute('r', 6);
+      c.setAttribute('fill', color); c.setAttribute('stroke', '#e6ecff'); c.setAttribute('stroke-width', 1.5);
+
+      const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+      label.setAttribute('x', n.x);
+      label.setAttribute('y', n.y - 12);
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('font-size', '12');
+      label.setAttribute('fill', '#e6ecff');
+      label.textContent = n.name || '';
+
+      group.appendChild(halo);
+      group.appendChild(c);
+      group.appendChild(label);
+
+      // interactions
+      group.addEventListener('mousedown', e=>startNodeDrag(e, n.id));
+      group.addEventListener('click', e=>onNodeClick(e, n.id));
+
+      gNodes.appendChild(group);
+    }
+
+    // edges
+    gEdges.innerHTML = '';
+    for(const e of edges){
+      const src = byId(nodes, e.source); const tgt = byId(nodes, e.target);
+      if(!src || !tgt) continue;
+
+      // 끝점을 노드 가장자리에 맞춤
+      const { x1, y1, x2, y2 } = edgeEndpoints(src, tgt);
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+      line.setAttribute('stroke', '#dce6ff');
+      line.setAttribute('stroke-width', selectedEdgeId===e.id ? 3 : 2);
+      line.setAttribute('opacity', 0.9);
+      line.setAttribute('data-id', e.id);
+      if(e.style === 'arrow'){
+        line.setAttribute('marker-end', 'url(#arrowEnd)');
+      } else if(e.style === 'double'){
+        line.setAttribute('marker-start', 'url(#arrowStart)');
+        line.setAttribute('marker-end', 'url(#arrowEnd)');
+      }
+      line.addEventListener('click', ev=>{ ev.stopPropagation(); selectedEdgeId = e.id; selectedNodeId = null; renderSelection(); });
+      line.addEventListener('dblclick', ev=>{
+        ev.stopPropagation();
+        snapshot(); // 변경 전 상태 저장
+        const name = prompt('연결선 이름을 입력하세요 (비우면 제거)', e.name||'')||'';
+        e.name = name.trim();
+        render();
+      });
+      // 보정된 중점으로 라벨 위치
+      const midx = (x1 + x2) / 2, midy = (y1 + y2) / 2;
+      const name = document.createElementNS('http://www.w3.org/2000/svg','text');
+      name.setAttribute('x', midx); name.setAttribute('y', midy - 5);
+      name.setAttribute('text-anchor','middle');
+      name.setAttribute('font-size', '12');
+      name.setAttribute('fill', '#cfe1ff');
+      name.style.pointerEvents = 'none';
+      name.textContent = e.name || '';
+
+      gEdges.appendChild(line);
+      if(e.name) gEdges.appendChild(name);
+    }
+
+    renderSelection();
+  }
+
+  function renderSelection(){
+    [...gNodes.querySelectorAll('g.node')].forEach(g=>{
+      const id = Number(g.getAttribute('data-id'));
+      const sel = id===selectedNodeId;
+      const halo = g.firstChild; // circle halo
+      halo.setAttribute('stroke', sel ? 'var(--sel)' : '#000');
+      halo.setAttribute('stroke-opacity', sel ? '0.9' : '0.25');
+    });
+  }
+
+  // ==========================
+  // Node drag & click
+  // ==========================
+  let dragInfo = null; // {id, offsetX, offsetY}
+  function startNodeDrag(e, nodeId){
+    e.stopPropagation();
+    const pt = clientToWorld(e.clientX, e.clientY);
+    const n = byId(nodes, nodeId);
+    dragInfo = { id: nodeId, offsetX: pt.x - n.x, offsetY: pt.y - n.y };
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragEnd);
+  }
+  function onDragMove(e){
+    if(!dragInfo) return;
+    const pt = clientToWorld(e.clientX, e.clientY);
+    const n = byId(nodes, dragInfo.id);
+    n.x = pt.x - dragInfo.offsetX; n.y = pt.y - dragInfo.offsetY;
+    render();
+  }
+  function onDragEnd(){ 
+    if(dragInfo){
+      const n = byId(nodes, dragInfo.id);
+      if(n){ 
+        n.origX = n.x;   // 새 중심점 저장
+        n.origY = n.y;
+      }
+    }
+    dragInfo = null; 
+    window.removeEventListener('mousemove', onDragMove); 
+    window.removeEventListener('mouseup', onDragEnd); 
+  }
+  function onNodeClick(e, nodeId){
+    e.stopPropagation();
+    const node = byId(nodes, nodeId);
+    selectedNodeId = nodeId; selectedEdgeId = null; renderSelection(); showSidebarForNode(node);
+  }
+
+  // ==========================
+  // Add / Remove
+  // ==========================
+  function addNode(x,y,name,type,desc){
+    const n = { id: nextNodeId++, name: (name||'').trim(), type: (type||'').trim(),
+                desc: (desc||'').trim(), x, y, origX:x, origY:y, vx:0, vy:0 };
+    nodes.push(n); render(); return n;
+  }
+  function addEdge(sourceId, targetId, style, name){
+    const e = { id: nextEdgeId++, source: sourceId, target: targetId, style: style||'arrow', name: name||'' };
+    edges.push(e); render(); return e;
+  }
+  function deleteSelection(){
+    if(selectedNodeId!=null){
+      edges = edges.filter(e=> e.source!==selectedNodeId && e.target!==selectedNodeId);
+      nodes = nodes.filter(n=> n.id!==selectedNodeId);
+      selectedNodeId=null; hideSidebar(); render();
+    } else if(selectedEdgeId!=null){
+      edges = edges.filter(e=> e.id!==selectedEdgeId);
+      selectedEdgeId=null; render();
+    }
+  }
+
+  // ==========================
+  // Pan/Zoom (Alt/⌘ + wheel)
+  // ==========================
+  let view = { tx:0, ty:0, s:1 };
+  function applyView(){ viewport.setAttribute('transform', `translate(${view.tx},${view.ty}) scale(${view.s})`); }
+
+  function clientToWorld(clientX, clientY){
+    const pt = svg.createSVGPoint(); pt.x = clientX; pt.y = clientY;
+    const inv = viewport.getScreenCTM().inverse();
+    const p = pt.matrixTransform(inv); return {x:p.x, y:p.y};
+  }
+
+  // === Canvas drag pan (ADD) ===
+  let panInfo = null; // {x,y}
+
+  function startPan(e){
+    // 빈 캔버스 좌클릭 드래그 또는 휠(가운데 버튼) 드래그로 패닝
+    if(!(e.button === 0 || e.button === 1)) return;
+    e.preventDefault();
+    panInfo = { x: e.clientX, y: e.clientY };
+    svg.style.cursor = 'grabbing';
+    window.addEventListener('mousemove', onPanMove);
+    window.addEventListener('mouseup', endPan);
+  }
+
+  function onPanMove(e){
+    if(!panInfo) return;
+    const dx = e.clientX - panInfo.x;
+    const dy = e.clientY - panInfo.y;
+    panInfo.x = e.clientX;
+    panInfo.y = e.clientY;
+    view.tx += dx;
+    view.ty += dy;
+    applyView();
+  }
+
+  function endPan(){
+    panInfo = null;
+    svg.style.cursor = 'default';
+    window.removeEventListener('mousemove', onPanMove);
+    window.removeEventListener('mouseup', endPan);
+  }
+
+  // ==========================
+  // Physics simulation
+  // ==========================
+  let physicsEnabled = true;
+  document.getElementById('togglePhysics').addEventListener('change', e=>{
+    physicsEnabled = e.target.checked;
+  });
+
+  svg.addEventListener('wheel', (e)=>{
+    // Alt + wheel 만 허용 (OS 무관)
+    if(!e.altKey) return;
+    e.preventDefault();
+
+    const focus = clientToWorld(e.clientX, e.clientY);
+    const prevS = view.s;
+    const dir = e.deltaY < 0 ? 1 : -1;
+    const factor = 1 + 0.05 * dir;
+    let nextS = prevS * factor;
+    nextS = Math.min(5, Math.max(0.2, nextS));
+
+    // 포커스 고정 줌
+    view.tx = view.tx + (prevS - nextS) * focus.x;
+    view.ty = view.ty + (prevS - nextS) * focus.y;
+    view.s = nextS;
+    applyView();
+  }, { passive:false });
+
+  // 빈 배경 좌클릭 드래그로 패닝
+  bg.addEventListener('mousedown', (e)=>{
+    if(e.button === 0) startPan(e);
+  });
+
+  // 어디서든 가운데 버튼 드래그로 패닝
+  svg.addEventListener('mousedown', (e)=>{
+    if(e.button === 1) startPan(e);
+  });
+
+  // ==========================
+  // Background click to clear selection
+  // ==========================
+  document.getElementById('bg').addEventListener('click', ()=>{ clearSelection(); });
+
+  // ==========================
+  // Sidebar events (FINAL REPLACEMENT)
+  // ==========================
+  document.getElementById('sbSave').addEventListener('click', ()=>{
+    if(selectedNodeId==null) return;
+    snapshot(); // 변경 전 상태 저장
+    const n = byId(nodes, selectedNodeId);
+    n.name = sbName.value.trim();
+    n.type = sbType.value.trim();
+    n.desc = sbDesc.value.trim();
+    render();
+    showSidebarForNode(n); // 저장 후 패널 값 재동기화
+  });
+
+  document.getElementById('sbClose').addEventListener('click', hideSidebar);
+
+  // ==========================
+  // Node creation flow (button -> click position -> form -> create)
+  // ==========================
+  let pendingCreate = null; // {x,y}
+  document.getElementById('btnAddNode').addEventListener('click', ()=>{
+    pendingCreate = {x: null, y: null};
+    svg.style.cursor = 'crosshair';
+    const onceClick = (e)=>{
+      if(e.target.closest('#sidebar')) return;
+      const pt = clientToWorld(e.clientX, e.clientY);
+      pendingCreate = { x: pt.x, y: pt.y };
+      svg.removeEventListener('click', onceClick);
+      svg.style.cursor = 'default';
+      openNodeFormAt(e.clientX, e.clientY);
+    };
+    svg.addEventListener('click', onceClick, { once: true });
+  });
+
+  function openNodeFormAt(clientX, clientY){
+    nodeForm.style.display='block';
+    const rect = nodeForm.getBoundingClientRect();
+    let left = clientX + 12; let top = clientY + 12;
+    left = Math.min(left, window.innerWidth - rect.width - 16);
+    top  = Math.min(top, window.innerHeight - rect.height - 16);
+    nodeForm.style.left = left + 'px';
+    nodeForm.style.top  = top + 'px';
+    nfName.value=''; nfType.value=''; nfDesc.value='';
+    setTimeout(()=>nfName.focus(), 0);
+  }
+  function closeNodeForm(){ nodeForm.style.display='none'; }
+  document.getElementById('nfCancel').addEventListener('click', closeNodeForm);
+  document.getElementById('nfCreate').addEventListener('click', ()=>{
+    if(!pendingCreate) return;
+    const name = nfName.value.trim();
+    const type = nfType.value.trim();
+    const desc = nfDesc.value.trim();
+    addNode(pendingCreate.x, pendingCreate.y, name, type, desc);
+    closeNodeForm(); pendingCreate = null;
+  });
+
+  // ==========================
+  // Edge style (연결선 종류)
+  // ==========================
+  function currentEdgeStyle(){
+    const v = document.querySelector('input[name="edgeStyle"]:checked').value;
+    return v; // 'arrow' | 'double' | 'line'
+  }
+
+  // ==========================
+  // Connect by name (이름으로 연결)
+  // ==========================
+  document.getElementById('btnConnectByName').addEventListener('click', ()=>{
+    const a = document.getElementById('edgeNameA').value.trim();
+    const b = document.getElementById('edgeNameB').value.trim();
+    if(!a || !b) { alert('두 이름을 모두 입력하세요.'); return; }
+
+    const n1 = nodes.find(n => n.name === a);
+    const n2 = nodes.find(n => n.name === b);
+
+    if(!n1 || !n2) {
+      alert('해당 이름의 노드를 찾을 수 없습니다.');
+      return;
+    }
+
+    snapshot(); // undo 지원
+    addEdge(n1.id, n2.id, currentEdgeStyle(), '');
+  });
+
+  // ==========================
+  // Keyboard shortcuts (REPLACEMENT)
+  // ==========================
+  function isTypingTarget(el){
+    return el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable);
+  }
+
+  window.addEventListener('keydown', e=>{
+    const key = (e.key||'').toLowerCase();
+    const mod = e.ctrlKey || e.metaKey; // macOS ⌘ 지원
+
+    // Undo / Redo
+    if(mod && key==='z'){
+      e.preventDefault();
+      if(e.shiftKey){ redo(); } else { undo(); }
+      return;
+    }
+    if(mod && key==='y'){
+      e.preventDefault();
+      redo();
+      return;
+    }
+
+    // Delete → 항상 그래프 삭제 우선
+    if(key==='delete'){
+      if(selectedNodeId!=null || selectedEdgeId!=null){
+        e.preventDefault();
+        deleteSelection();
+      }
+      return;
+    }
+  });
+
+  // ==========================
+  // Export / Import / Reset
+  // ==========================
+  document.getElementById('btnExport').addEventListener('click', ()=>{
+    const defaultName = 'graph';  // 기본 제안 이름 (확장자 제외)
+    const inputName = prompt('저장할 파일 이름을 입력하세요:', defaultName);
+    if(!inputName) return; // 취소하면 저장 안 함
+
+    // 확장자 자동 처리
+    const fileName = inputName.endsWith('.json') ? inputName : inputName + '.json';
+
+    const data = { 
+      nodes, 
+      edges, 
+      palette, 
+      paletteIdx, 
+      typeColor: Array.from(typeColor.entries()), 
+      nextNodeId, 
+      nextEdgeId 
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; 
+    a.download = fileName;
+    document.body.appendChild(a); 
+    a.click(); 
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  const fileImport = document.getElementById('fileImport');
+  document.getElementById('btnImport').addEventListener('click', ()=> fileImport.click());
+  fileImport.addEventListener('change', (e)=>{
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const data = JSON.parse(reader.result);
+        nodes = (data.nodes||[]).map(n=>({
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          desc: n.desc,
+          x: n.x,
+          y: n.y,
+          origX: n.origX ?? n.x,   // origX 없으면 현재 좌표 사용
+          origY: n.origY ?? n.y,
+          vx: 0,
+          vy: 0
+        }));
+        edges = (data.edges||[]).map(e=>({id:e.id, source:e.source, target:e.target, style:e.style||'arrow', name:e.name||''}));
+        nextNodeId = Number(data.nextNodeId)|| (Math.max(0, ...nodes.map(n=>n.id))+1);
+        nextEdgeId = Number(data.nextEdgeId)|| (Math.max(0, ...edges.map(e=>e.id))+1);
+        paletteIdx = Number(data.paletteIdx)||0;
+        typeColor.clear();
+        if(Array.isArray(data.typeColor)) for(const [k,v] of data.typeColor) typeColor.set(k,v);
+        render();
+      }catch(err){ alert('불러오기 실패: ' + err.message); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  // -----------------------------
+  // Undo / Redo 스택
+  // -----------------------------
+  const undoStack = [];
+  const redoStack = [];
+
+  function snapshot(){
+    const data = JSON.stringify({
+      nodes,
+      edges,
+      nextNodeId,
+      nextEdgeId,
+      paletteIdx,
+      typeColor: Array.from(typeColor.entries())
+    });
+    // 직전 스냅샷과 동일하면 무시
+    if(undoStack.length && undoStack[undoStack.length-1] === data){
+      return;
+    }
+    undoStack.push(data);
+    redoStack.length = 0;
+  }
+
+  function restore(data){
+    const obj = JSON.parse(data);
+    nodes = obj.nodes;
+    edges = obj.edges;
+    nextNodeId = obj.nextNodeId;
+    nextEdgeId = obj.nextEdgeId;
+    paletteIdx = obj.paletteIdx;
+    typeColor.clear();
+    for(const [k,v] of obj.typeColor){ typeColor.set(k,v); }
+    clearSelection();
+    render();
+  }
+
+  function undo(){
+    if(undoStack.length===0) return;
+    const state = undoStack.pop();
+    redoStack.push(JSON.stringify({nodes, edges, nextNodeId, nextEdgeId, paletteIdx, typeColor:Array.from(typeColor.entries())}));
+    restore(state);
+  }
+
+  function redo(){
+    if(redoStack.length===0) return;
+    const state = redoStack.pop();
+    undoStack.push(JSON.stringify({nodes, edges, nextNodeId, nextEdgeId, paletteIdx, typeColor:Array.from(typeColor.entries())}));
+    restore(state);
+  }
+
+  // -----------------------------
+  // 주요 변경 함수에 snapshot 호출 추가
+  // -----------------------------
+  const _addNode = addNode;
+  addNode = function(...args){ snapshot(); return _addNode.apply(this,args); };
+
+  const _addEdge = addEdge;
+  addEdge = function(...args){ snapshot(); return _addEdge.apply(this,args); };
+
+  const _deleteSelection = deleteSelection;
+  deleteSelection = function(...args){ snapshot(); return _deleteSelection.apply(this,args); };
+
+  // 초기화도 스냅샷 + 한 번만 확인
+  document.getElementById('btnReset').addEventListener('click', ()=>{
+    if(!confirm('모든 노드/연결을 삭제하고 초기화할까요?')) return;
+    snapshot();
+    nodes = []; edges = []; nextNodeId=1; nextEdgeId=1; paletteIdx=0; typeColor.clear();
+    clearSelection(); render();
+    document.getElementById('edgeNameA').value = '';
+    document.getElementById('edgeNameB').value = '';
+  });
+
+  // ==========================
+  // Initial render
+  // ==========================
+  function animate(){
+    updatePhysics();
+    render();
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  </script>
+</body>
+</html>
