@@ -226,6 +226,7 @@
     canvas.width = Math.max(1, Math.floor(W*dpr)); canvas.height = Math.max(1, Math.floor(H*dpr));
     canvas.style.width = W+'px'; canvas.style.height = H+'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    centerView();
   }
   addEventListener('resize', resize);
   new ResizeObserver(()=>resize()).observe(canvas.parentElement || document.body);
@@ -538,7 +539,23 @@
   // ─── 기타 편의 ─────────────────────────────────────────────────────────
   function spawnNodeAtCenter(){ const [wx,wy]=screenToWorld(W/2,H/2); const n=addNodeAt('', wx+rand(-60,60), wy+rand(-40,40)); rebuildAdj(); selectNode(n.id,true); ui.status.textContent=`노드 추가: ${n.id}`; pushAction({type:'addNode', node:{...n}}); }
   function resetPositions(){ for(const n of nodes){ n.x=n.homeX; n.y=n.homeY; n.vx=0; n.vy=0; } centerView(); ui.status.textContent='재정렬 완료'; }
-  function centerView(){ if(nodes.length===0){ tx=W/2; ty=H/2; scale=1; return; } let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity; for(const n of nodes){ if(n.x<minX)minX=n.x; if(n.y<minY)minY=n.y; if(n.x>maxX)maxX=n.x; if(n.y>maxY)maxY=n.y; } const pad=100; const bw=(maxX-minX)+pad*2, bh=(maxY-minY)+pad*2; const sX=W/bw, sY=H/bh; scale=clamp(0.3,2.5, Math.min(sX,sY)); const cx=(minX+maxX)/2, cy=(minY+maxY)/2; const [sx,sy]=worldToScreen(cx,cy); tx += (W/2 - sx); ty += (H/2 - sy); }
+  function centerView(overscan = 0.8){
+    if(nodes.length===0){ tx=W/2; ty=H/2; scale=1; return; }
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    for(const n of nodes){
+      if(n.x<minX)minX=n.x; if(n.y<minY)minY=n.y;
+      if(n.x>maxX)maxX=n.x; if(n.y>maxY)maxY=n.y;
+    }
+    const pad=100;
+    const bw=(maxX-minX)+pad*2, bh=(maxY-minY)+pad*2;
+    const sX=W/bw, sY=H/bh;
+    const fit = Math.min(sX, sY) * overscan;   // ← 추가: 과소배율로 더 축소
+    scale = clamp(0.3, 2.5, fit);
+
+    const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+    const [sx,sy]=worldToScreen(cx,cy);
+    tx += (W/2 - sx); ty += (H/2 - sy);
+  }
   function hardResetGraph(){ nodes.length=0; edges.length=0; nextNodeId=1; nextEdgeId=1; adj.clear(); edgeSet=new Set(); hoverId=0; selectedId=0; dragId=0; edgePick=null; pendingAction=null; edgeMode=EDGE_MODE.OFF; ui.nodeEditor.style.display='none'; ui.selBadge.textContent='선택: 없음'; updateEdgeModeLabel(); ui.status.textContent='그래프 초기화(노드/간선 삭제)'; undoStack.length=0; redoStack.length=0; scale=1; tx=W/2; ty=H/2; }
 
   // 삭제/간선 헬퍼
