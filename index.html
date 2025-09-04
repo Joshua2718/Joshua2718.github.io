@@ -124,7 +124,7 @@
           휠: 확대/축소 · 빈 곳 드래그: 패닝 · 노드 드래그: 이동/고정<br/>
           N: 노드 추가 · E: 간선 모드 전환(끔→화살표→선분) · R: 재정렬 · C: 중앙 맞춤<br/>
           Enter: 검색 선택 실행 · Delete: 검색 선택 삭제 · /: 검색창 포커스 토글<br/>
-          ESC: 선택·상태만 초기화 · Shift+ESC: 그래프 전체 초기화(노드/간선 삭제)<br/>
+          Shift+ESC: 그래프 전체 초기화(노드/간선 삭제)<br/>
           ⌘/Ctrl+Z: Undo · ⌘/Ctrl+Shift+Z: Redo
         </div>
       </div>
@@ -503,7 +503,6 @@
     if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ if(!isForm){ if(e.shiftKey) redo(); else undo(); e.preventDefault(); } return; }
 
     // 개선: ESC 분리 — 기본은 선택/상태 초기화, Shift+ESC는 전체 삭제
-    if(e.key==='Escape' && !e.shiftKey){ clearSelection(); edgeMode=EDGE_MODE.OFF; updateEdgeModeLabel(); ui.status.textContent='선택/상태 초기화'; return; }
     if(e.key==='Escape' && e.shiftKey){ hardResetGraph(); nextNodeId=1; nextEdgeId=1; return; }
 
     if(isForm) return;
@@ -563,7 +562,22 @@
   // ─── 검색창 UX ─────────────────────────────────────────────────────────
   function isEditableEl(el){ return !!el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.tagName==='SELECT' || el.isContentEditable===true); }
   function focusLabelSearch(){ ui.searchLabel.focus(); ui.searchLabel.select(); ui.status.textContent='라벨 검색란 포커스'; }
-  function handleFocusKey(){ const el=document.activeElement; if(isEditableEl(el)){ el.blur(); ui.status.textContent='포커스 해제'; } else { focusLabelSearch(); } }
+  function focusNodeEditor(){ ui.edLabel.focus(); ui.edLabel.select(); ui.status.textContent='노드 편집란 포커스'; }
+  function handleFocusKey(){
+    const el = document.activeElement;
+    const nodeEditorOpen = ui.nodeEditor && ui.nodeEditor.style.display !== 'none';
+    if (isEditableEl(el)) {
+      // 이미 어떤 입력창에 포커스가 있으면 포커스 해제
+      el.blur();
+      ui.status.textContent = '포커스 해제';
+    } else if (edgeMode === EDGE_MODE.OFF && selectedId && nodeEditorOpen) {
+      // 노드정보란이 열려 있고 노드가 선택된 경우 → 노드 정보 입력란에 포커스
+      focusNodeEditor();
+    } else {
+      // 그 외에는 검색창 포커스
+      focusLabelSearch();
+    }
+  }
   function clearSearchInputs(){ ui.searchLabel.value=''; ui.searchType.value=''; ui.searchDesc.value=''; }
   function isSearchEmpty(){ const lab=(ui.searchLabel.value||'').trim(); const typ=(ui.searchType.value||'').trim(); const des=(ui.searchDesc.value||'').trim(); return !lab && !typ && !des; }
 
