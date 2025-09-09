@@ -124,7 +124,7 @@
           휠: 확대/축소 · 빈 곳 드래그: 패닝 · 노드 드래그: 이동/고정<br/>
           N: 노드 추가 · E: 간선 모드 전환(끔→화살표→선분) · R: 재정렬 · C: 중앙 맞춤<br/>
           Enter: 검색 선택 실행 · Delete: 검색 선택 삭제 · /: 검색창 포커스 토글<br/>
-          Shift+ESC: 그래프 전체 초기화(노드/간선 삭제)<br/>
+          Shift+Del: 그래프 전체 초기화(노드/간선 삭제)<br/>
           ⌘/Ctrl+Z: Undo · ⌘/Ctrl+Shift+Z: Redo
         </div>
       </div>
@@ -503,8 +503,8 @@
     if(e.key==='/' ){ e.preventDefault(); handleFocusKey(); return; }
     if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ if(!isForm){ if(e.shiftKey) redo(); else undo(); e.preventDefault(); } return; }
 
-    // 개선: ESC 분리 — 기본은 선택/상태 초기화, Shift+ESC는 전체 삭제
-    if(e.key==='Escape' && e.shiftKey){ hardResetGraph(); nextNodeId=1; nextEdgeId=1; return; }
+    // 개선: ESC 분리 — 기본은 선택/상태 초기화, Shift+Delete는 전체 삭제
+    if(e.key==='Delete' && e.shiftKey){ hardResetGraph(); nextNodeId=1; nextEdgeId=1; return; }
 
     if(isForm) return;
     if(e.key==='n' || e.key==='N') spawnNodeAtCenter();
